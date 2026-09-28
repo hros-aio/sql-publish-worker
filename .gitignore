@@ -1,0 +1,28 @@
+# Binaries
+hros-event-worker
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test artifacts
+*.test
+*.out
+coverage.txt
+profile.out
+
+# Vendor & Dependencies
+vendor/
+
+# IDEs & OS
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.idea/
+.vscode/
+
+# Environment files
+.env
+.env.local

@@ -1,0 +1,12 @@
+.git
+.specify
+.agents
+specs
+docs
+*.md
+.gitignore
+.dockerignore
+vendor/
+bin/
+*.out
+*.test
