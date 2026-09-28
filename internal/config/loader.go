@@ -62,7 +62,9 @@ func LoadConfig(workerType, configPath string) (*DomainConfig, error) {
 	}
 
 	// Apply Environment Variables
-	applyEnvOverrides(workerType, &cfg)
+	if err := applyEnvOverrides(workerType, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid environment variable override: %w", err)
+	}
 
 	// Validate config
 	if err := ValidateConfig(&cfg); err != nil {
@@ -165,7 +167,7 @@ func mergeDomainConfig(dst, src *DomainConfig) {
 	}
 }
 
-func applyEnvOverrides(workerType string, cfg *DomainConfig) {
+func applyEnvOverrides(workerType string, cfg *DomainConfig) error {
 	prefix := "HROS_" + strings.ToUpper(workerType) + "_"
 
 	// Database
@@ -173,9 +175,11 @@ func applyEnvOverrides(workerType string, cfg *DomainConfig) {
 		cfg.Database.Host = v
 	}
 	if v := os.Getenv(prefix + "DATABASE_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.Database.Port = p
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid %sDATABASE_PORT: %w", prefix, err)
 		}
+		cfg.Database.Port = p
 	}
 	if v := os.Getenv(prefix + "DATABASE_NAME"); v != "" {
 		cfg.Database.Name = v
@@ -206,28 +210,38 @@ func applyEnvOverrides(workerType string, cfg *DomainConfig) {
 
 	// Outbox
 	if v := os.Getenv(prefix + "OUTBOX_BATCH_SIZE"); v != "" {
-		if bs, err := strconv.Atoi(v); err == nil {
-			cfg.Outbox.BatchSize = bs
+		bs, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid %sOUTBOX_BATCH_SIZE: %w", prefix, err)
 		}
+		cfg.Outbox.BatchSize = bs
 	}
 	if v := os.Getenv(prefix + "OUTBOX_POLL_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.Outbox.PollInterval = d
+		d, err := time.ParseDuration(v)
+		if err != nil {
+			return fmt.Errorf("invalid %sOUTBOX_POLL_INTERVAL: %w", prefix, err)
 		}
+		cfg.Outbox.PollInterval = d
 	}
 	if v := os.Getenv(prefix + "OUTBOX_MAX_RETRIES"); v != "" {
-		if mr, err := strconv.Atoi(v); err == nil {
-			cfg.Outbox.MaxRetries = mr
+		mr, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid %sOUTBOX_MAX_RETRIES: %w", prefix, err)
 		}
+		cfg.Outbox.MaxRetries = mr
 	}
 
 	// HTTP & Log
 	if v := os.Getenv(prefix + "HTTP_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.HTTP.Port = p
+		p, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid %sHTTP_PORT: %w", prefix, err)
 		}
+		cfg.HTTP.Port = p
 	}
 	if v := os.Getenv(prefix + "LOG_LEVEL"); v != "" {
 		cfg.LogLevel = v
 	}
+
+	return nil
 }

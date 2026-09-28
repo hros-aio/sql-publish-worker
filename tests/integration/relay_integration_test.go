@@ -174,7 +174,40 @@ func TestEndToEndRelayFailureLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 1, count)
 
-	// Verify database status transition to FAILED
+	// Verify database status remains PENDING for transient failures
+	assert.Equal(t, outbox.StatusPending, repo.events[eventID].Status)
+	assert.Nil(t, repo.events[eventID].PublishedAt)
+}
+
+func TestEndToEndRelayPermanentFailureLifecycle(t *testing.T) {
+	repo := NewInMemoryRepository()
+	pub := &InMemoryPublisher{}
+	resolver := kafka.NewTopicResolver("")
+
+	eventID := uuid.New()
+	aggID := uuid.New()
+	testEvent := &outbox.Event{
+		ID:            eventID,
+		TenantCode:    "tenant-enterprise",
+		CreatedAt:     time.Now().UTC(),
+		UpdatedAt:     time.Now().UTC(),
+		AggregateType: "company",
+		AggregateID:   aggID,
+		EventType:     "setting.company.updated",
+		EventVersion:  1,
+		Payload:       []byte(`{malformed json`),
+		Status:        outbox.StatusPending,
+	}
+	repo.AddEvent(testEvent)
+
+	cfg := config.DefaultDomainConfig("setting")
+	processor := outbox.NewProcessor("setting", cfg, repo, pub, resolver, nil, nil)
+
+	count, err := processor.ProcessBatch(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	// Verify database status transition to FAILED for permanent error
 	assert.Equal(t, outbox.StatusFailed, repo.events[eventID].Status)
 	assert.Nil(t, repo.events[eventID].PublishedAt)
 }

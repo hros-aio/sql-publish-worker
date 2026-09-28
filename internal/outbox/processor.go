@@ -165,6 +165,10 @@ func (p *Processor) ProcessBatch(ctx context.Context) (int, error) {
 		}
 
 		for attempt := 1; attempt <= maxAttempts; attempt++ {
+			if ctx.Err() != nil {
+				break
+			}
+
 			pubStart := time.Now()
 			pubErr := p.publisher.Publish(ctx, topic, partitionKey, envelope)
 			pubDuration := time.Since(pubStart).Seconds()
@@ -210,9 +214,9 @@ func (p *Processor) ProcessBatch(ctx context.Context) (int, error) {
 				"error", pubErr.Error(),
 			)
 
-			if !isTransient || attempt == maxAttempts {
-				// Permanent failure or retry exhausted
-				p.logger.Error("failed to publish outbox event, marking as FAILED",
+			if !isTransient {
+				// Permanent failure - mark as FAILED
+				p.logger.Error("failed to publish outbox event due to permanent error, marking as FAILED",
 					"worker_type", p.workerType,
 					"event_id", evt.ID.String(),
 					"event_type", evt.EventType,
@@ -227,12 +231,28 @@ func (p *Processor) ProcessBatch(ctx context.Context) (int, error) {
 				break
 			}
 
+			if attempt == maxAttempts {
+				// Transient retry attempts for this polling cycle exhausted; keep event PENDING for future poll
+				p.logger.Warn("Transient retry attempts exhausted for current polling cycle; event remains PENDING",
+					"worker_type", p.workerType,
+					"event_id", evt.ID.String(),
+					"event_type", evt.EventType,
+					"topic", topic,
+					"attempts", maxAttempts,
+				)
+				break
+			}
+
 			// Backoff before next attempt
 			backoff := p.retryPolicy.Backoff(attempt)
+			cancelled := false
 			select {
 			case <-ctx.Done():
-				break
+				cancelled = true
 			case <-time.After(backoff):
+			}
+			if cancelled {
+				break
 			}
 		}
 

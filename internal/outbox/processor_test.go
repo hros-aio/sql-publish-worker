@@ -171,7 +171,7 @@ func TestProcessor_ProcessBatch_FailureIsolation(t *testing.T) {
 	mockPublisher.AssertExpectations(t)
 }
 
-func TestProcessor_ProcessBatch_KafkaRetryExhaustion(t *testing.T) {
+func TestProcessor_ProcessBatch_KafkaRetryExhaustion_TransientKeepsPending(t *testing.T) {
 	cfg := config.DefaultDomainConfig("access")
 	cfg.Outbox.MaxRetries = 2
 	cfg.Outbox.RetryBackoff = 1 * time.Millisecond
@@ -198,9 +198,53 @@ func TestProcessor_ProcessBatch_KafkaRetryExhaustion(t *testing.T) {
 
 	mockRepo.On("ClaimBatch", mock.Anything, cfg.Outbox.BatchSize).Return(events, nil)
 	mockResolver.On("ResolveTopic", "access.role.assigned").Return("access.role", nil)
-	// Kafka fails twice (transient timeout)
+	// Kafka fails twice with transient network error
 	mockPublisher.On("Publish", mock.Anything, "access.role", aggID.String(), mock.Anything).
 		Return(errors.New("connection reset by peer")).Twice()
+
+	// Transient error does NOT call MarkFailed; event remains PENDING for next polling cycle
+	processor := NewProcessor("access", cfg, mockRepo, mockPublisher, mockResolver, nil, nil)
+
+	count, err := processor.ProcessBatch(context.Background())
+	require.NoError(t, err)
+	assert.Equal(t, 1, count)
+
+	mockRepo.AssertNotCalled(t, "MarkFailed", mock.Anything, mock.Anything, mock.Anything)
+	mockRepo.AssertNotCalled(t, "MarkPublished", mock.Anything, mock.Anything, mock.Anything)
+	mockRepo.AssertExpectations(t)
+	mockPublisher.AssertExpectations(t)
+}
+
+func TestProcessor_ProcessBatch_PermanentKafkaFailureMarksFailed(t *testing.T) {
+	cfg := config.DefaultDomainConfig("access")
+	cfg.Outbox.MaxRetries = 3
+	cfg.Outbox.RetryBackoff = 1 * time.Millisecond
+
+	mockRepo := new(MockRepository)
+	mockPublisher := new(MockPublisher)
+	mockResolver := new(MockTopicResolver)
+
+	eventID := uuid.New()
+	aggID := uuid.New()
+	events := []Event{
+		{
+			ID:            eventID,
+			TenantCode:    "tenant-1",
+			CreatedAt:     time.Now().UTC(),
+			AggregateType: "role",
+			AggregateID:   aggID,
+			EventType:     "access.role.assigned",
+			EventVersion:  1,
+			Payload:       []byte(`{"role":"admin"}`),
+			Status:        StatusPending,
+		},
+	}
+
+	mockRepo.On("ClaimBatch", mock.Anything, cfg.Outbox.BatchSize).Return(events, nil)
+	mockResolver.On("ResolveTopic", "access.role.assigned").Return("access.role", nil)
+	// Permanent failure (e.g. unsupported event version or invalid character)
+	mockPublisher.On("Publish", mock.Anything, "access.role", aggID.String(), mock.Anything).
+		Return(errors.New("unsupported event version")).Once()
 
 	mockRepo.On("MarkFailed", mock.Anything, eventID, mock.Anything).Return(nil)
 

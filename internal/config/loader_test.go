@@ -92,3 +92,16 @@ func TestValidateConfig(t *testing.T) {
 	invalidCfg.Outbox.BatchSize = 0
 	assert.Error(t, ValidateConfig(&invalidCfg))
 }
+
+func TestLoadConfig_InvalidEnvOverrides(t *testing.T) {
+	t.Setenv("HROS_ACCESS_DATABASE_PORT", "invalid_port")
+	_, err := LoadConfig("access", "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid HROS_ACCESS_DATABASE_PORT")
+
+	t.Setenv("HROS_ACCESS_DATABASE_PORT", "5432")
+	t.Setenv("HROS_ACCESS_OUTBOX_POLL_INTERVAL", "not_a_duration")
+	_, err = LoadConfig("access", "")
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid HROS_ACCESS_OUTBOX_POLL_INTERVAL")
+}
